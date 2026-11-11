@@ -1,6 +1,6 @@
 # AWS CloudOps Auto-Healing Platform
 
-**Terraform + AWS Lambda + API Gateway + DynamoDB + CloudWatch + EventBridge + SNS + GitHub Actions OIDC**
+**Terraform + AWS Lambda + API Gateway + DynamoDB + CloudWatch + EventBridge + SNS + GitHub Actions CI**
 
 A small, cost-aware AWS operational automation project for CloudOps / DevOps / SRE interviews. It demonstrates a **controlled application fault** detected by native Lambda telemetry, followed by **event-driven state remediation**. It does *not* reboot actual instances or recover physical infrastructure.
 
@@ -8,7 +8,7 @@ A small, cost-aware AWS operational automation project for CloudOps / DevOps / S
 
 ```mermaid
 flowchart TD
-  GH[GitHub Actions CI/CD] -->|OIDC, update function code| L[App Lambda]
+  GH[GitHub Actions CI] --> BUILD[Unit tests and Lambda ZIP artifacts]
   API[API Gateway GET /health] --> L
   L -->|GetItem| DB[(DynamoDB demo state)]
   L -->|Unhandled error metric| CW[CloudWatch Alarm]
@@ -21,10 +21,10 @@ flowchart TD
 ## Security and cost decisions
 
 - No EC2, EKS, NAT gateway, load balancer, VPC endpoints, RDS or always-on worker.
-- One low-capacity provisioned DynamoDB table, two 128-MB Lambdas with concurrency capped at 2, one CloudWatch alarm, one EventBridge rule and a small SNS topic.
+- One low-capacity provisioned DynamoDB table, two 128-MB Lambdas using account-level concurrency, one CloudWatch alarm, one EventBridge rule and a small SNS topic.
 - **Public endpoint supports only `GET /health`**; failure injection requires authenticated AWS CLI permissions. API rate-limited at the gateway.
 - Application IAM policy allows only `dynamodb:GetItem`; remediation policy allows only `dynamodb:UpdateItem` and `sns:Publish` for the specific resources.
-- GitHub deploy role can only update code for the project's two Lambda functions and trusts the exact main-branch GitHub OIDC subject (including immutable owner/repository IDs).
+- GitHub Actions tests and packages code without AWS credentials. Terraform deployment is performed through AWS CloudShell.
 - Lambda log retention is three days. Public APIs can still receive traffic and costs can arise on some plans; always check credits/billing and destroy unused resources.
 - Terraform state is local in AWS CloudShell and ignored by Git. Keep CloudShell `$HOME` data safe; do not delete `.tfstate` or commit it.
 
@@ -106,42 +106,36 @@ cd ..
 bash scripts/reset.sh
 ```
 
-## 3. Wire GitHub Actions CI/CD (optional final phase)
+## 3. GitHub Actions CI
 
-**Create a NEW public GitHub repo called** `aws-cloudops-auto-healing-platform` **with no README** (we already have one). In CloudShell, from repo root, configure exact OIDC trust using GitHub's public API:
+Repository: https://github.com/PRIYAM2652/aws-cloudops-auto-healing-platform
 
-```bash
-bash scripts/configure-github.sh YOUR_GITHUB_USERNAME/aws-cloudops-auto-healing-platform
-cd infra
-terraform apply
-terraform output -raw github_role_arn
-terraform output -raw health_url
-```
+Pushes to main automatically trigger GitHub Actions to:
 
-This handles GitHub repos created after **2026-07-15**, whose OIDC `sub` embeds immutable account/repo IDs.
+1. Check out the source code.
+2. Set up Python 3.12.
+3. Execute the unit tests.
+4. Package both Lambda functions.
+5. Upload ZIP build artifacts.
 
-In GitHub repo → Settings → Secrets and variables → Actions → **Variables** → New repository variable, configure:
+The pipeline was verified successful on November 11, 2026.
 
-- `AWS_REGION`: same region used in Terraform (e.g. `ap-south-1`)
-- `AWS_ROLE_ARN`: output of `terraform output -raw github_role_arn`
+AWS deployment is managed separately through Terraform
+in AWS CloudShell. Automated deployment using GitHub OIDC
+was evaluated but blocked by an AWS Organizations SCP
+denying iam:CreateOpenIDConnectProvider.
 
-Then push source code. **Never push `terraform.tfstate`, `*.tfvars.json`, credentials, or ZIPs.**
+No permanent AWS access keys are stored in GitHub.
 
-```bash
-cd ..
-git init
- git branch -M main
- git add .
- git commit -m "Add Terraform-managed AWS auto-healing demo"
- git remote add origin https://github.com/YOUR_GITHUB_USERNAME/aws-cloudops-auto-healing-platform.git
- git push -u origin main
-```
+### Verified Auto-Healing Results
 
-CloudShell's HTTPS git push requires a GitHub personal access token (not a GitHub password), or you can upload the unzipped project files using GitHub Desktop on your laptop. A GitHub credential must **never** be committed to the repo. For easier authentication in a browser, GitHub's CLI `gh auth login` is another route if installed.
-
-GitHub Actions will run unit tests then update both function ZIPs using short-lived OIDC credentials. Only the `main` branch can assume the AWS role.
-
-**Important:** Do not run the new `deploy.yml` before Terraform has created its GitHub OIDC role and you've set the two GitHub repository variables.
+- Initial health check: HTTP 200
+- Simulated failure: HTTP 500
+- CloudWatch: OK to ALARM
+- EventBridge invoked the remediation Lambda
+- DynamoDB: FAILED to HEALTHY
+- Final API response: HTTP 200
+- Recovery duration: approximately 105 seconds
 
 ## 4. Run tests
 
@@ -160,7 +154,7 @@ cd infra
 terraform destroy
 ```
 
-**After using CI/CD:** Terraform may not track code changes made by GitHub Actions (code changes are intentionally ignored to keep Terraform from overwriting them). `terraform destroy` still removes the managed resources.
+**Cleanup:** Use the original Terraform state in CloudShell to destroy the managed resources when the lab is no longer required.
 
 ## Troubleshooting
 
@@ -179,8 +173,8 @@ terraform destroy
 
 **Problem:** An app can enter a failed state; relying solely on on-call staff is slow.
 
-**Solution:** Terraform provisions an event-driven system; CloudWatch detects errors; EventBridge invokes a least-privilege recovery Lambda; DynamoDB transitions back to healthy; SNS notifies an operator; GitHub Actions rolls out code securely with OIDC.
+**Solution:** Terraform provisions an event-driven system; CloudWatch detects errors; EventBridge invokes a least-privilege recovery Lambda; DynamoDB transitions back to healthy; SNS notifies an operator; GitHub Actions validates and packages the Lambda code.
 
 **Operational insight:** Auto-healing here is *application-state remediation*, not real server repair. Tradeoffs include alarm evaluation delay, idempotence and conditional writes, notification delivery, exposure of public health endpoints, lack of guaranteed exactly-once delivery, and tracking Terraform state separately from CI code updates.
 
-**Resume bullet:** Built a Terraform-managed AWS application auto-healing demo with Lambda, API Gateway, DynamoDB, CloudWatch alarms, EventBridge, SNS and GitHub Actions OIDC, validating fault injection, recovery, alerting and secure CI/CD.
+**Resume bullet:** Built a Terraform-managed AWS application auto-healing demo with Lambda, API Gateway, DynamoDB, CloudWatch alarms, EventBridge, SNS and GitHub Actions CI, validating fault injection, automated recovery and application health.
