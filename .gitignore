@@ -1,0 +1,33 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.terraform/
+*.tfstate*
+*.tfvars
+*.tfvars.json
+.terraform.lock.hcl
+infra/*.zip
+*.zip
+!*.example.zip
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+
+# Credentials
+.env
+.env.*
+*.pem
+*.key
+.aws/
+
+# Python
+__pycache__/
+*.pyc
+
+# Build artifacts
+*.zip

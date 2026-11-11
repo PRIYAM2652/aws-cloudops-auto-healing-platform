@@ -1,0 +1,46 @@
+name: AWS CloudOps CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Unit Tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Package Lambda Functions
+        run: |
+          python - <<'PY'
+          from zipfile import ZipFile, ZIP_DEFLATED
+
+          for name in ("app", "remediate"):
+              with ZipFile(f"{name}.zip", "w", ZIP_DEFLATED) as z:
+                  z.write(f"src/{name}.py", arcname=f"{name}.py")
+
+          print("Lambda packages created successfully")
+          PY
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-packages
+          path: |
+            app.zip
+            remediate.zip
